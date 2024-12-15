@@ -48,6 +48,18 @@ const Feeds = () => {
     trpc.feed.add.useMutation({});
   const { mutateAsync: refreshMpArticles, isLoading: isGetArticlesLoading } =
     trpc.feed.refreshArticles.useMutation();
+  const {
+    mutateAsync: getHistoryArticles,
+    isLoading: isGetHistoryArticlesLoading,
+  } = trpc.feed.getHistoryArticles.useMutation();
+
+  const { data: inProgressHistoryMp, refetch: refetchInProgressHistoryMp } =
+    trpc.feed.getInProgressHistoryMp.useQuery(undefined, {
+      refetchOnWindowFocus: true,
+      refetchInterval: 10 * 1e3,
+      refetchOnMount: true,
+      refetchOnReconnect: true,
+    });
 
   const { data: isRefreshAllMpArticlesRunning } =
     trpc.feed.isRefreshAllMpArticlesRunning.useQuery();
@@ -60,30 +72,34 @@ const Feeds = () => {
   const [currentMpId, setCurrentMpId] = useState(id || '');
 
   const handleConfirm = async () => {
+    console.log('wxsLink', wxsLink);
     // TODO show operation in progress
-    const res = await getMpInfo({ wxsLink: wxsLink });
-    if (res[0]) {
-      const item = res[0];
-      await addFeed({
-        id: item.id,
-        mpName: item.name,
-        mpCover: item.cover,
-        mpIntro: item.intro,
-        updateTime: item.updateTime,
-        status: 1,
-      });
-      await refreshMpArticles({ mpId: item.id });
-
-      toast.success('添加成功', {
-        description: `公众号 ${item.name}`,
-      });
-      refetchFeedList();
-      setWxsLink('');
-      onClose();
-      await queryUtils.article.list.reset();
-    } else {
-      toast.error('添加失败', { description: '请检查链接是否正确' });
+    const wxsLinks = wxsLink.split('\n').filter((link) => link.trim() !== '');
+    for (const link of wxsLinks) {
+      console.log('add wxsLink', link);
+      const res = await getMpInfo({ wxsLink: link });
+      if (res[0]) {
+        const item = res[0];
+        await addFeed({
+          id: item.id,
+          mpName: item.name,
+          mpCover: item.cover,
+          mpIntro: item.intro,
+          updateTime: item.updateTime,
+          status: 1,
+        });
+        await refreshMpArticles({ mpId: item.id });
+        toast.success('添加成功', {
+          description: `公众号 ${item.name}`,
+        });
+        await queryUtils.article.list.reset();
+      } else {
+        toast.error('添加失败', { description: '请检查链接是否正确' });
+      }
     }
+    refetchFeedList();
+    setWxsLink('');
+    onClose();
   };
 
   const isActive = (key: string) => {
@@ -216,6 +232,55 @@ const Feeds = () => {
                   </Link>
                 </Tooltip>
                 <Divider orientation="vertical" />
+                {currentMpInfo.hasHistory === 1 && (
+                  <>
+                    <Tooltip
+                      content={
+                        inProgressHistoryMp?.id === currentMpInfo.id
+                          ? `正在获取第${inProgressHistoryMp.page}页...`
+                          : `历史文章需要分批次拉取，请耐心等候，频繁调用可能会导致一段时间内不可用`
+                      }
+                      color={
+                        inProgressHistoryMp?.id === currentMpInfo.id
+                          ? 'primary'
+                          : 'danger'
+                      }
+                    >
+                      <Link
+                        size="sm"
+                        href="#"
+                        isDisabled={
+                          (inProgressHistoryMp?.id
+                            ? inProgressHistoryMp?.id !== currentMpInfo.id
+                            : false) ||
+                          isGetHistoryArticlesLoading ||
+                          isGetArticlesLoading
+                        }
+                        onClick={async (ev) => {
+                          ev.preventDefault();
+                          ev.stopPropagation();
+
+                          if (inProgressHistoryMp?.id === currentMpInfo.id) {
+                            await getHistoryArticles({
+                              mpId: '',
+                            });
+                          } else {
+                            await getHistoryArticles({
+                              mpId: currentMpInfo.id,
+                            });
+                          }
+
+                          await refetchInProgressHistoryMp();
+                        }}
+                      >
+                        {inProgressHistoryMp?.id === currentMpInfo.id
+                          ? `停止获取历史文章`
+                          : `获取历史文章`}
+                      </Link>
+                    </Tooltip>
+                    <Divider orientation="vertical" />
+                  </>
+                )}
 
                 <Tooltip content="启用服务端定时更新">
                   <div>
@@ -258,7 +323,13 @@ const Feeds = () => {
                 </Tooltip>
 
                 <Divider orientation="vertical" />
-                <Tooltip content={<div>可添加.atom/.rss/.json格式输出</div>}>
+                <Tooltip
+                  content={
+                    <div>
+                      可添加.atom/.rss/.json格式输出, limit=20&page=1控制分页
+                    </div>
+                  }
+                >
                   <Link
                     size="sm"
                     showAnchorIcon
@@ -334,7 +405,7 @@ const Feeds = () => {
                   onValueChange={setWxsLink}
                   autoFocus
                   label="分享链接"
-                  placeholder="输入公众号文章分享链接，如 https://mp.weixin.qq.com/s/xxxxxx"
+                  placeholder="输入公众号文章分享链接，一行一条，如 https://mp.weixin.qq.com/s/xxxxxx https://mp.weixin.qq.com/s/xxxxxx"
                   variant="bordered"
                 />
               </ModalBody>
